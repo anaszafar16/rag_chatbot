@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RAG Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>RAG Chatbot</h1>
+            </div>
+            <div class="upload-container">
+                <div class="upload-box" id="drop-zone">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>Drag & Drop files here</p>
+                    <p>or</p>
+                    <label for="file-upload" class="upload-button">
+                        Choose Files
+                        <input type="file" id="file-upload" multiple hidden>
+                    </label>
+                </div>
+                <div class="upload-list" id="upload-list">
+                    <!-- Uploaded files will appear here -->
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <p>Supported formats: PDF, TXT, DOCX, Images</p>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="main-content">
+            <div class="chat-container">
+                <div class="chat-header">
+                    <h2>Chat Session</h2>
+                    <button onclick="clearChat()" class="clear-button">
+                        <i class="fas fa-trash"></i> Clear Chat
+                    </button>
+                </div>
+                
+                <div id="chat-messages" class="chat-messages">
+                    <div class="message system-message">
+                        <div class="message-content">
+                            Welcome! Upload documents and ask questions about them.
+                        </div>
+                        <div class="message-time">Now</div>
+                    </div>
+                </div>
+
+                <div class="input-container">
+                    <textarea 
+                        id="user-input" 
+                        placeholder="Type your message..." 
+                        rows="1"
+                        onkeydown="handleKeyPress(event)"></textarea>
+                    <button onclick="sendMessage()" id="send-button">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loader"></div>
+        <p>Processing...</p>
+    </div>
+
+    <script>
+        // Handle textarea auto-resize
+        const textarea = document.getElementById('user-input');
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+
+        // Handle drag and drop
+        const dropZone = document.getElementById('drop-zone');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('drag-over');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('drag-over');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        // File upload handling
+        document.getElementById('file-upload').addEventListener('change', function(e) {
+            handleFiles(this.files);
+        });
+
+        async function handleFiles(files) {
+            for (let file of files) {
+                await uploadFile(file);
+            }
+        }
+
+        async function uploadFile(file) {
+            // Add file to upload list
+            const uploadList = document.getElementById('upload-list');
+            const fileItem = document.createElement('div');
+            fileItem.className = 'upload-item';
+            fileItem.innerHTML = `
+                <i class="fas fa-file"></i>
+                <span>${file.name}</span>
+                <div class="upload-progress">
+                    <div class="progress-bar"></div>
+                </div>
+            `;
+            uploadList.appendChild(fileItem);
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    fileItem.classList.add('upload-success');
+                    fileItem.innerHTML = `
+                        <i class="fas fa-check-circle"></i>
+                        <span>${file.name}</span>
+                    `;
+                    displayMessage('system', `File ${file.name} processed successfully`);
+                } else {
+                    fileItem.classList.add('upload-error');
+                    fileItem.innerHTML = `
+                        <i class="fas fa-exclamation-circle"></i>
+                        <span>${file.name}</span>
+                    `;
+                    displayMessage('system', `Error processing ${file.name}: ${data.error}`);
+                }
+            } catch (error) {
+                fileItem.classList.add('upload-error');
+                fileItem.innerHTML = `
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span>${file.name}</span>
+                `;
+                displayMessage('system', `Error uploading ${file.name}: ${error}`);
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            // Clear input and reset height
+            input.value = '';
+            input.style.height = 'auto';
+
+            displayMessage('user', message);
+            
+            // Show loading state
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({message: message})
+                });
+                
+                const data = await response.json();
+                displayMessage('bot', data.response);
+            } catch (error) {
+                displayMessage('system', 'Error: Could not get response from the bot.');
+            } finally {
+                document.getElementById('loading-overlay').classList.add('hidden');
+            }
+        }
+
+        function displayMessage(sender, message) {
+            const chatMessages = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message`;
+            
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            messageDiv.innerHTML = `
+                <div class="message-content">${message}</div>
+                <div class="message-time">${time}</div>
+            `;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function clearChat() {
+            const chatMessages = document.getElementById('chat-messages');
+            chatMessages.innerHTML = `
+                <div class="message system-message">
+                    <div class="message-content">Chat cleared. Start a new conversation!</div>
+                    <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html> 

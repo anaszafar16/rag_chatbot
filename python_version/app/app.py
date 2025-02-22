@@ -1,6 +1,12 @@
 from flask import Flask, render_template, request, jsonify
 import os
+import sys
 from dotenv import load_dotenv
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
 from src.retriever.retriever import Retriever
 from src.llm.model import LLMHandler
 from src.utils.file_handlers import FileHandler
@@ -11,7 +17,7 @@ import uuid
 load_dotenv()
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'data/documents'
+app.config['UPLOAD_FOLDER'] = os.path.join(project_root, 'data/documents')
 retriever = Retriever()
 llm = LLMHandler()
 embedding_handler = EmbeddingHandler()
